@@ -7,6 +7,7 @@
     "start": "node src/index.js & node src/poller.js"
   },
   "dependencies": {
-    "express": "^5.2.1"
+    "express": "^5.2.1",
+    "node-cron": "^3.0.3"
   }
 }
