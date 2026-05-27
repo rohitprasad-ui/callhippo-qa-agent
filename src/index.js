@@ -3,6 +3,7 @@ import Anthropic from "@anthropic-ai/sdk";
 import express from "express";
 import crypto from "crypto";
 import { handleRecordingCompleted } from "./agent.js";
+import { startPoller } from "./poller.js";
 
 const app = express();
 app.use(express.json());
@@ -30,6 +31,7 @@ app.get("/health", (_req, res) => res.json({ status: "ok" }));
 
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => console.log(`CallHippo QA Agent running on port ${PORT}`));
+startPoller();
 
 // ═══════════════════════════════════════════════════════════════
 // QA REPORT ENGINE — Weekly / Monthly / Quarterly

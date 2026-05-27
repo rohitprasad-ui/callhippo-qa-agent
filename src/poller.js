@@ -20,5 +20,8 @@ async function poll() {
   }
 }
 
-poll();
-setInterval(poll, POLL_INTERVAL);
+export function startPoller() {
+  console.log("[Poller] Starting — checking every 5 minutes...");
+  poll();
+  setInterval(poll, POLL_INTERVAL);
+}
