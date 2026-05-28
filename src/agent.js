@@ -22,11 +22,11 @@ async function runPipeline(recordingId) {
   const meetingData = await fetchMeetingData(recordingId);
   console.log(`[Agent] Meeting: "${meetingData.title}" — host: ${meetingData.hostEmail}`);
 
-  // Skip no-show or very short calls (less than 8 minutes)
-  const durationParts = (meetingData.duration || "0:00").split(":");
-  const durationMins = parseInt(durationParts[0]) * 60 + parseInt(durationParts[1] || 0);
-  if (durationMins < 8) {
-    console.log(`[Agent] Skipping short call (${meetingData.duration}) — likely no-show`);
+  // Skip calls with no meaningful conversation in transcript
+  const transcriptText = (meetingData.transcript || "").trim();
+  const meaningfulWords = transcriptText.split(/\s+/).filter(w => w.length > 2).length;
+  if (meaningfulWords < 50) {
+    console.log(`[Agent] Skipping call — no meaningful conversation found (${meaningfulWords} words)`);
     return;
   }
 
