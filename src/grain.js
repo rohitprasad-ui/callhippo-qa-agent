@@ -79,10 +79,7 @@ export async function fetchRecentRecordings() {
 
 export async function fetchPastCallsByProspect(prospectName, currentRecordingId) {
   try {
-    const data = await grainPost('/_/public-api/v2/recordings', {
-      filter: {},
-      limit: 50
-    });
+    const data = await grainPost('/_/public-api/v2/recordings', { filter: {} });
     const allRecordings = data.recordings || [];
     return allRecordings.filter(r =>
       r.id !== currentRecordingId &&
