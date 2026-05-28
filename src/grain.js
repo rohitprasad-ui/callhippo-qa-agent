@@ -76,3 +76,20 @@ export async function fetchRecentRecordings() {
   const data = await grainPost('/_/public-api/v2/recordings', { filter: {} });
   return data.recordings || [];
 }
+
+export async function fetchPastCallsByProspect(prospectName, currentRecordingId) {
+  try {
+    const data = await grainPost('/_/public-api/v2/recordings', {
+      filter: {},
+      limit: 50
+    });
+    const allRecordings = data.recordings || [];
+    return allRecordings.filter(r =>
+      r.id !== currentRecordingId &&
+      r.title && r.title.toLowerCase().includes(prospectName.toLowerCase().split(" ")[0])
+    );
+  } catch (err) {
+    console.error("[Grain] fetchPastCallsByProspect error:", err.message);
+    return [];
+  }
+}

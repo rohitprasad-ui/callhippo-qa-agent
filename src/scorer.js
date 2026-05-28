@@ -1,11 +1,14 @@
+import { fetchPastCallsByProspect } from "./grain.js";
+
 const MODEL = "claude-sonnet-4-5";
 
-function buildSystemPrompt(ae, callType) {
+function buildSystemPrompt(ae, callType, pastCallCount) {
   const baseContext = `You are a CallHippo sales coach reviewing recorded calls for Account Executives.
 AE CONTEXT:
 - Name: ${ae.name}
 - Team: ${ae.team} (${ae.segment})
 - Product: CallHippo (cloud telephony, VoIP, AI voice agents)
+- Past calls with this prospect: ${pastCallCount}
 
 IMPORTANT RULES:
 - Give specific, actionable feedback based ONLY on what happened in THIS call
@@ -16,7 +19,7 @@ IMPORTANT RULES:
 
   const callTypePrompts = {
     discovery: `
-CALL TYPE: Discovery Call
+CALL TYPE: Discovery Call (First call with this prospect)
 YOUR JOB: Evaluate how well the AE uncovered the prospect's pain, situation, and needs.
 
 SCORING CRITERIA & WEIGHTS:
@@ -30,15 +33,28 @@ SCORING CRITERIA & WEIGHTS:
 SCORING: 9-10: Excellent | 7-8: Good | 5-6: Average | 3-4: Below average | 1-2: Critical issues`,
 
     demo: `
-CALL TYPE: Demo Call
+CALL TYPE: Demo Call (Prospect has had 1 prior call)
 YOUR JOB: Evaluate how well the AE demonstrated value relevant to the prospect's specific needs.
 
 SCORING CRITERIA & WEIGHTS:
 - Demo Quality (30%): Was demo tailored to prospect's pain? Did it show relevant features?
 - Pricing & Objections (25%): Was pricing presented confidently? Were objections handled well?
 - Next Steps Confirmed (20%): Was a clear next step committed to during the call?
-- Prep & Punctuality (15%): Was the AE prepared with prospect context?
+- Prep & Punctuality (15%): Was the AE prepared with prospect context from previous call?
 - Audio & Technical (10%): Call quality, demo technical issues
+
+SCORING: 9-10: Excellent | 7-8: Good | 5-6: Average | 3-4: Below average | 1-2: Critical issues`,
+
+    followup: `
+CALL TYPE: Follow-up Call (Prospect has had ${pastCallCount} prior calls)
+YOUR JOB: Evaluate how well the AE moved the deal forward from previous interactions.
+
+SCORING CRITERIA & WEIGHTS:
+- Continuity (25%): Did the AE reference previous conversations correctly? Did they follow through on promises?
+- Objection Handling (25%): Were pending objections addressed effectively?
+- Next Steps Confirmed (25%): Was a clear next step committed to with date/time?
+- Pricing & Closing (15%): Was there an attempt to advance or close appropriately?
+- Audio & Technical (10%): Call quality and professionalism
 
 SCORING: 9-10: Excellent | 7-8: Good | 5-6: Average | 3-4: Below average | 1-2: Critical issues`,
 
@@ -53,36 +69,10 @@ SCORING CRITERIA & WEIGHTS:
 - Product Knowledge (15%): Did the AE correctly explain features, workarounds, or solutions?
 - Audio & Technical (10%): Call quality and professionalism
 
-SCORING: 9-10: Excellent | 7-8: Good | 5-6: Average | 3-4: Below average | 1-2: Critical issues`,
-
-    followup: `
-CALL TYPE: Follow-up Call
-YOUR JOB: Evaluate how well the AE moved the deal forward from the previous interaction.
-
-SCORING CRITERIA & WEIGHTS:
-- Continuity (25%): Did the AE reference previous conversation correctly? Did they follow through on promises?
-- Objection Handling (25%): Were pending objections addressed effectively?
-- Next Steps Confirmed (25%): Was a clear next step committed to with date/time?
-- Pricing & Closing (15%): Was there an attempt to advance or close appropriately?
-- Audio & Technical (10%): Call quality and professionalism
-
-SCORING: 9-10: Excellent | 7-8: Good | 5-6: Average | 3-4: Below average | 1-2: Critical issues`,
-
-    default: `
-CALL TYPE: General Sales Call
-YOUR JOB: Evaluate the overall quality of this sales interaction.
-
-SCORING CRITERIA & WEIGHTS:
-- Discovery & Understanding (25%): Did the AE understand the prospect/customer's situation?
-- Next Steps Confirmed (25%): Was a clear next step committed to with date/time?
-- Communication Quality (20%): Was the AE clear, confident, and professional?
-- Product Knowledge (20%): Were features and value explained accurately?
-- Audio & Technical (10%): Call quality and professionalism
-
 SCORING: 9-10: Excellent | 7-8: Good | 5-6: Average | 3-4: Below average | 1-2: Critical issues`
   };
 
-  const criteriaPrompt = callTypePrompts[callType] || callTypePrompts.default;
+  const criteriaPrompt = callTypePrompts[callType] || callTypePrompts.discovery;
 
   return baseContext + criteriaPrompt + `
 
@@ -106,28 +96,53 @@ Respond ONLY with valid JSON:
 }`;
 }
 
-function detectCallType(meetingData) {
+async function detectCallType(meetingData) {
   const title = (meetingData.title || "").toLowerCase();
   const notes = (meetingData.notes || "").toLowerCase();
   const combined = title + " " + notes;
 
-  if (combined.includes("discovery") || combined.includes("intro") || combined.includes("first call")) {
-    return "discovery";
-  } else if (combined.includes("demo") || combined.includes("demonstration") || combined.includes("walkthrough")) {
-    return "demo";
-  } else if (combined.includes("retention") || combined.includes("churn") || combined.includes("csm") || combined.includes("handoff") || combined.includes("cancel")) {
-    return "retention";
-  } else if (combined.includes("follow") || combined.includes("followup") || combined.includes("follow-up") || combined.includes("check in") || combined.includes("checkin")) {
-    return "followup";
+  // Retention check first - title based
+  if (combined.includes("retention") || combined.includes("churn") ||
+      combined.includes("csm") || combined.includes("handoff") ||
+      combined.includes("cancel") || combined.includes("onboarding")) {
+    return { callType: "retention", pastCallCount: 0 };
   }
-  return "default";
+
+  // Get prospect name from participants (external/non-callhippo person)
+  const prospectParticipant = meetingData.participants?.find(p =>
+    p && !String(p).toLowerCase().includes("callhippo")
+  );
+  const prospectName = prospectParticipant || "";
+
+  if (!prospectName) {
+    return { callType: "discovery", pastCallCount: 0 };
+  }
+
+  // Fetch past calls with this prospect
+  try {
+    const pastCalls = await fetchPastCallsByProspect(prospectName, meetingData.meetingId);
+    const pastCallCount = pastCalls.length;
+
+    console.log(`[Scorer] Prospect: ${prospectName} | Past calls: ${pastCallCount}`);
+
+    if (pastCallCount === 0) {
+      return { callType: "discovery", pastCallCount: 0 };
+    } else if (pastCallCount === 1) {
+      return { callType: "demo", pastCallCount: 1 };
+    } else {
+      return { callType: "followup", pastCallCount };
+    }
+  } catch (err) {
+    console.error("[Scorer] detectCallType error:", err.message);
+    return { callType: "discovery", pastCallCount: 0 };
+  }
 }
 
 export async function scoreCall(meetingData, ae) {
   console.log("[Claude] Scoring call for " + ae.name);
 
-  const callType = detectCallType(meetingData);
-  console.log("[Claude] Detected call type: " + callType);
+  const { callType, pastCallCount } = await detectCallType(meetingData);
+  console.log(`[Claude] Detected call type: ${callType} (past calls: ${pastCallCount})`);
 
   const userMessage = `Analyze this sales call.
 
@@ -154,7 +169,7 @@ ${meetingData.transcript}`;
     body: JSON.stringify({
       model: MODEL,
       max_tokens: 2000,
-      system: buildSystemPrompt(ae, callType),
+      system: buildSystemPrompt(ae, callType, pastCallCount),
       messages: [{ role: "user", content: userMessage }],
     }),
   });
