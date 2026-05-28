@@ -1,7 +1,7 @@
 const SLACK_API = "https://slack.com/api/chat.postMessage";
 
 function riskColor(flag) {
-  if (flag.includes("🔴")) return "#E24B4A";
+  if (flag.includes("🟢")) return "#E24B4A";
   if (flag.includes("🟡")) return "#EF9F27";
   return "#1D9E75";
 }
@@ -11,19 +11,32 @@ export async function postFeedbackToSlack(ae, meetingData, scoring) {
   const token = process.env.SLACK_BOT_TOKEN;
   if (!token) throw new Error("SLACK_BOT_TOKEN not set");
 
-  const c = scoring.criteriaScores;
+  const c = scoring.criteriaScores || {};
+
+  // Dynamic criteria — works for any call type
+  const criteriaLine = Object.entries(c)
+    .map(([key, val]) => {
+      const label = key
+        .replace(/([A-Z])/g, " $1")
+        .replace(/^./, s => s.toUpperCase())
+        .trim();
+      return `${label}: ${val}/10`;
+    })
+    .join(" | ");
+
+  const callTypeLabel = (scoring.callType || "call").charAt(0).toUpperCase() + (scoring.callType || "call").slice(1);
 
   const blocks = [
     { type: "header", text: { type: "plain_text", text: `📞 Call Feedback — ${ae.name}`, emoji: true }},
     { type: "section", fields: [
       { type: "mrkdwn", text: `*Meeting:*\n${meetingData.title}` },
-      { type: "mrkdwn", text: `*Type:*\n${scoring.callType || "Sales call"}` },
+      { type: "mrkdwn", text: `*Type:*\n${callTypeLabel}` },
       { type: "mrkdwn", text: `*Duration:*\n${meetingData.duration}` },
       { type: "mrkdwn", text: `*Team:*\n${ae.team}` },
     ]},
     { type: "divider" },
-    { type: "section", text: { type: "mrkdwn", text: `*Score: ${scoring.callScore}/10* ${scoring.riskFlag}\n_${scoring.industryBenchmarkGap}_` }},
-    { type: "section", text: { type: "mrkdwn", text: `*Criteria:*\nDiscovery: ${c.discoveryDepth}/10 | Next Steps: ${c.nextStepsConfirmed}/10 | Demo: ${c.demoQuality}/10 | Pricing: ${c.pricingAndObjections}/10\nPrep: ${c.prepAndPunctuality}/10 | Audio: ${c.audioAndTechnical}/10 | Compliance: ${c.complianceAwareness}/10 | Stakeholder: ${c.stakeholderManagement}/10` }},
+    { type: "section", text: { type: "mrkdwn", text: `*Score: ${scoring.callScore}/10* ${scoring.riskFlag}` }},
+    { type: "section", text: { type: "mrkdwn", text: `*Criteria:*\n${criteriaLine}` }},
     { type: "divider" },
     { type: "section", text: { type: "mrkdwn", text: `✅ *What Was Good*\n${(scoring.whatWasGood || []).map(s => `• ${s}`).join("\n")}` }},
     { type: "section", text: { type: "mrkdwn", text: `⚠️ *What Can Be Better*\n${(scoring.whatCanBeBetter || []).map(i => `• ${i}`).join("\n")}` }},
