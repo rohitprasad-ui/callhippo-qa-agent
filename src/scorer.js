@@ -1,17 +1,148 @@
 const MODEL = "claude-sonnet-4-5";
 
-function buildSystemPrompt(ae) {
-  const name = ae.name;
-  const team = ae.team;
-  const segment = ae.segment;
+function buildSystemPrompt(ae, callType) {
+  const baseContext = `You are a CallHippo sales coach reviewing recorded calls for Account Executives.
+AE CONTEXT:
+- Name: ${ae.name}
+- Team: ${ae.team} (${ae.segment})
+- Product: CallHippo (cloud telephony, VoIP, AI voice agents)
 
-  return "You are an expert B2B SaaS sales coach with 15+ years of experience training top-performing Account Executives at companies like Salesforce, HubSpot, and Zoom.\n\nAE CONTEXT:\n- Name: " + name + "\n- Team: " + team + " (" + segment + " segment)\n- Product: CallHippo (cloud telephony, VoIP, AI voice agents)\n\nWORLD-CLASS AE BENCHMARK:\n\nDiscovery:\n- Asks open-ended questions: What is your current setup? What is not working? What happens if this is not solved in 6 months?\n- Qualifies BANT: Budget, Authority, Need, Timeline every call\n- Listens more than talks: 60% prospect talking, 40% AE\n\nDemo:\n- Never generic, always ties features to specific pain discovered\n- Shows the ONE thing prospect cares most about first\n- Gets prospect to interact: Can you see how this works for your team?\n\nObjection Handling:\n- Explores before responding: Tell me more about that concern\n- Uses social proof: We had a similar customer who...\n- Never ends call with unresolved objection\n\nClosing and Next Steps:\n- Always leaves with SPECIFIC next step: date, time, who attends\n- Sends calendar invite DURING the call\n- Never accepts I will think about it without scheduled callback\n\nSCORING (1-10 vs world-class benchmark):\n- 9-10: World-class\n- 7-8: Good, minor gaps\n- 5-6: Average, key elements missing\n- 3-4: Below standard\n- 1-2: Critical failures\n\nCRITERIA AND WEIGHTS:\n- Discovery depth: x2.0\n- Next steps confirmed: x2.0\n- Demo quality: x1.5\n- Pricing and objections: x1.5\n- Pre-call prep: x1.5\n- Audio and technical: x1.5\n- Compliance: x1.0\n- Stakeholder management: x1.0\n\nFinal score = Sum(score x weight) / 12.5\n\nFEEDBACK RULES:\nBAD: Discovery was weak\nGOOD: When prospect said X, you did Y. A world-class AE would have said: [exact script]\n\nRespond ONLY with valid JSON:\n{\n  \"callScore\": 0.0,\n  \"riskFlag\": \"🔴 At Risk or 🟡 Average or 🟢 Good\",\n  \"callType\": \"Discovery or Demo or Discovery + Demo or Retention or Follow-up\",\n  \"criteriaScores\": {\n    \"prepAndPunctuality\": 0,\n    \"discoveryDepth\": 0,\n    \"demoQuality\": 0,\n    \"complianceAwareness\": 0,\n    \"pricingAndObjections\": 0,\n    \"stakeholderManagement\": 0,\n    \"nextStepsConfirmed\": 0,\n    \"audioAndTechnical\": 0\n  },\n  \"whatWasGood\": [\"point 1\", \"point 2\", \"point 3\"],\n  \"whatCanBeBetter\": [\"point 1 with exact script\", \"point 2 with exact script\", \"point 3 with exact script\"],\n  \"hotTake\": \"single most important thing to fix next call\",\n  \"industryBenchmarkGap\": \"2-3 sentences where is this AE vs world-class\",\n  \"nextCallFocus\": \"one specific thing to practice next call\",\n  \"remarkNextSteps\": \"what AE must do in next 24 hours\"\n}";
+IMPORTANT RULES:
+- Give specific, actionable feedback based ONLY on what happened in THIS call
+- Do NOT compare to "world-class AEs" or use benchmark comparison language
+- Do NOT say things like "World-class AEs do X" or "Top performers always Y"
+- Focus on: what was done, what was missed, what to do next time
+- Be direct and constructive, not preachy`;
+
+  const callTypePrompts = {
+    discovery: `
+CALL TYPE: Discovery Call
+YOUR JOB: Evaluate how well the AE uncovered the prospect's pain, situation, and needs.
+
+SCORING CRITERIA & WEIGHTS:
+- Discovery Depth (30%): Did they ask open-ended questions? Understand current setup, pain points, urgency?
+- Next Steps Confirmed (20%): Was a clear next meeting booked with date/time during the call?
+- Compliance Awareness (15%): Were legal/regulatory topics handled correctly if raised?
+- Prep & Punctuality (15%): Was the AE prepared? Did they know the prospect's background?
+- Audio & Technical (10%): Call quality, no dead air, professional setup
+- Stakeholder Management (10%): Did they identify decision makers?
+
+SCORING: 9-10: Excellent | 7-8: Good | 5-6: Average | 3-4: Below average | 1-2: Critical issues`,
+
+    demo: `
+CALL TYPE: Demo Call
+YOUR JOB: Evaluate how well the AE demonstrated value relevant to the prospect's specific needs.
+
+SCORING CRITERIA & WEIGHTS:
+- Demo Quality (30%): Was demo tailored to prospect's pain? Did it show relevant features?
+- Pricing & Objections (25%): Was pricing presented confidently? Were objections handled well?
+- Next Steps Confirmed (20%): Was a clear next step committed to during the call?
+- Prep & Punctuality (15%): Was the AE prepared with prospect context?
+- Audio & Technical (10%): Call quality, demo technical issues
+
+SCORING: 9-10: Excellent | 7-8: Good | 5-6: Average | 3-4: Below average | 1-2: Critical issues`,
+
+    retention: `
+CALL TYPE: Retention / CSM Handoff Call
+YOUR JOB: Evaluate how well the AE handled the retention situation or handoff.
+
+SCORING CRITERIA & WEIGHTS:
+- Issue Understanding (30%): Did the AE fully understand the customer's concern or churn reason?
+- Resolution & Next Steps (25%): Was there a clear resolution plan with committed next actions?
+- Relationship Management (20%): Was the conversation empathetic and relationship-preserving?
+- Product Knowledge (15%): Did the AE correctly explain features, workarounds, or solutions?
+- Audio & Technical (10%): Call quality and professionalism
+
+SCORING: 9-10: Excellent | 7-8: Good | 5-6: Average | 3-4: Below average | 1-2: Critical issues`,
+
+    followup: `
+CALL TYPE: Follow-up Call
+YOUR JOB: Evaluate how well the AE moved the deal forward from the previous interaction.
+
+SCORING CRITERIA & WEIGHTS:
+- Continuity (25%): Did the AE reference previous conversation correctly? Did they follow through on promises?
+- Objection Handling (25%): Were pending objections addressed effectively?
+- Next Steps Confirmed (25%): Was a clear next step committed to with date/time?
+- Pricing & Closing (15%): Was there an attempt to advance or close appropriately?
+- Audio & Technical (10%): Call quality and professionalism
+
+SCORING: 9-10: Excellent | 7-8: Good | 5-6: Average | 3-4: Below average | 1-2: Critical issues`,
+
+    default: `
+CALL TYPE: General Sales Call
+YOUR JOB: Evaluate the overall quality of this sales interaction.
+
+SCORING CRITERIA & WEIGHTS:
+- Discovery & Understanding (25%): Did the AE understand the prospect/customer's situation?
+- Next Steps Confirmed (25%): Was a clear next step committed to with date/time?
+- Communication Quality (20%): Was the AE clear, confident, and professional?
+- Product Knowledge (20%): Were features and value explained accurately?
+- Audio & Technical (10%): Call quality and professionalism
+
+SCORING: 9-10: Excellent | 7-8: Good | 5-6: Average | 3-4: Below average | 1-2: Critical issues`
+  };
+
+  const criteriaPrompt = callTypePrompts[callType] || callTypePrompts.default;
+
+  return baseContext + criteriaPrompt + `
+
+Respond ONLY with valid JSON:
+{
+  "callScore": 0.0,
+  "riskFlag": "At Risk or Average or Good",
+  "callType": "${callType}",
+  "criteriaScores": {
+    "score1Name": 0,
+    "score2Name": 0,
+    "score3Name": 0,
+    "score4Name": 0,
+    "score5Name": 0
+  },
+  "whatWasGood": ["specific thing 1", "specific thing 2", "specific thing 3"],
+  "whatCanBeBetter": ["specific actionable improvement 1", "specific actionable improvement 2", "specific actionable improvement 3"],
+  "hotTake": "one honest sentence about the single most important thing to improve",
+  "nextCallFocus": "one specific thing to practice on the very next call",
+  "remarkNextSteps": "what AE must do in next 24 hours"
+}`;
+}
+
+function detectCallType(meetingData) {
+  const title = (meetingData.title || "").toLowerCase();
+  const notes = (meetingData.notes || "").toLowerCase();
+  const combined = title + " " + notes;
+
+  if (combined.includes("discovery") || combined.includes("intro") || combined.includes("first call")) {
+    return "discovery";
+  } else if (combined.includes("demo") || combined.includes("demonstration") || combined.includes("walkthrough")) {
+    return "demo";
+  } else if (combined.includes("retention") || combined.includes("churn") || combined.includes("csm") || combined.includes("handoff") || combined.includes("cancel")) {
+    return "retention";
+  } else if (combined.includes("follow") || combined.includes("followup") || combined.includes("follow-up") || combined.includes("check in") || combined.includes("checkin")) {
+    return "followup";
+  }
+  return "default";
 }
 
 export async function scoreCall(meetingData, ae) {
   console.log("[Claude] Scoring call for " + ae.name);
 
-  const userMessage = "Analyze this sales call.\n\nMeeting: " + meetingData.title + "\nDuration: " + meetingData.duration + "\nParticipants: " + meetingData.participants.join(", ") + "\n\nAI Notes:\n" + (meetingData.notes || "None") + "\n\nAction Items:\n" + (meetingData.actionItems || "None") + "\n\nTranscript:\n" + meetingData.transcript;
+  const callType = detectCallType(meetingData);
+  console.log("[Claude] Detected call type: " + callType);
+
+  const userMessage = `Analyze this sales call.
+
+Meeting: ${meetingData.title}
+Duration: ${meetingData.duration}
+Participants: ${meetingData.participants.join(", ")}
+
+AI Notes:
+${meetingData.notes || "None"}
+
+Action Items:
+${meetingData.actionItems || "None"}
+
+Transcript:
+${meetingData.transcript}`;
 
   const response = await fetch("https://api.anthropic.com/v1/messages", {
     method: "POST",
@@ -23,7 +154,7 @@ export async function scoreCall(meetingData, ae) {
     body: JSON.stringify({
       model: MODEL,
       max_tokens: 2000,
-      system: buildSystemPrompt(ae),
+      system: buildSystemPrompt(ae, callType),
       messages: [{ role: "user", content: userMessage }],
     }),
   });
