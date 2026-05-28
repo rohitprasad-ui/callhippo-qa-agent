@@ -22,6 +22,14 @@ async function runPipeline(recordingId) {
   const meetingData = await fetchMeetingData(recordingId);
   console.log(`[Agent] Meeting: "${meetingData.title}" — host: ${meetingData.hostEmail}`);
 
+  // Skip no-show or very short calls (less than 8 minutes)
+  const durationParts = (meetingData.duration || "0:00").split(":");
+  const durationMins = parseInt(durationParts[0]) * 60 + parseInt(durationParts[1] || 0);
+  if (durationMins < 8) {
+    console.log(`[Agent] Skipping short call (${meetingData.duration}) — likely no-show`);
+    return;
+  }
+
   const ae = getAEByEmail(meetingData.hostEmail);
   if (!ae) {
     console.log(`[Agent] ${meetingData.hostEmail} not in roster — skipping`);
